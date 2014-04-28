@@ -1,0 +1,97 @@
+#!/usr/bin/env ruby
+# coding: utf-8
+# vim: ts=2 et sw=2 sts=2
+
+%w{irpanel irpanel/cli open-uri nokogiri uri}.each {|g| require g }
+
+class WeatherSource
+  attr_reader :place
+  def initialize(place)
+    @place = place
+    load_data
+  end
+
+  def load_data
+    begin
+      data = open('http://www.yr.no/place/' + URI.encode(@place) + '/forecast.xml').read
+      @doc = Nokogiri::XML.parse(data)
+      @next_update = Time.parse(@doc.xpath('//nextupdate').first.content)
+    rescue => e
+      STDERR.puts "Error loading/parsing data: #{e}"
+    end
+  end
+
+  def get_forecast
+    load_data if Time.now > @next_update
+    c = find_current
+    info = c.xpath('symbol/@name').to_s
+    temp = c.xpath('temperature/@value').to_s
+    wind = c.xpath('windSpeed/@mps').to_s + ' ' +\
+           c.xpath('windDirection/@code').to_s
+    pres = c.xpath('pressure/@value').to_s
+    "#{info}\n#{temp} #{wind} #{pres}"
+  end
+
+  def find_current
+    current = @doc.xpath('//time').select do |t|
+      (Time.parse(t['from']) < Time.now) and (Time.parse(t['to']) > Time.now)
+    end
+    current.any? ? current.first : @doc.xpath('//time[1]').first
+  end
+end
+
+class WeatherClockApp < IRPanel::App
+  GLYPHS = {
+    :rarr => 126.chr,
+    :dot => 165.chr,
+    :bar => 255.chr,
+  }
+
+  field :clock,   0, 0 
+  field :date,    0, 1
+  field :finfo,   0, 2
+  field :fdetail, 0, 3
+
+  context :main do
+    key('exit') { exit(0) }
+  end
+
+  thread :main do
+    while true
+      now = Time.now
+      update(:clock, now.strftime('%H:%M %Z'.center(20)))
+      if now.hour == 0 && now.min == 0
+        update(:date, now.strftime('%Y-%m-%d %a').center(20))
+      end
+      if now.min == 0
+        general, detail = @forecast.get_forecast.split("\n")
+        update(:finfo, general.center(20))
+        update(:fdetail, detail.center(20))
+      end
+      sleep(60-now.sec)
+    end
+  end
+
+  def setup
+    @forecast = WeatherSource.new(@config[:place])
+    general, detail = @forecast.get_forecast.split("\n")
+
+    update(:clock, Time.now.strftime('%H:%M %Z').center(20))
+    update(:date, Time.now.strftime('%Y-%m-%d %a').center(20))
+    update(:finfo, general.center(20))
+    update(:fdetail, detail.center(20))
+  end
+end
+
+if __FILE__ == $0
+  IRPanel::Cli.run!(WeatherClockApp, __FILE__) do
+    @config.merge!({
+      :loglevel => Logger::WARN,
+      :place => 'Poland/Łódź/Łódź',
+    })
+    @options += [
+      ['--place STR', String, "Yr.no place path (default: #{@config[:place]})",\
+        lambda {|a| @config[:place] = a }],
+    ]
+  end
+end

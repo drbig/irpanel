@@ -1,0 +1,40 @@
+#!/usr/bin/env ruby
+# coding: utf-8
+# vim: ts=2 et sw=2 sts=2
+
+%w{irpanel irpanel/cli}.each {|g| require g }
+
+class SimpleApp < IRPanel::App
+  field :clock, 0, 0
+  field :date,  0, 1
+  field :msg,   0, 2
+
+  context :main do
+    key('exit') { exit(0) }
+    key('stop') { puts 'you pressed stop' }
+  end
+
+  thread :clock do
+    while true
+      now = Time.now
+      update(:clock, now.strftime('%H:%M %Z').center(20))
+      if now.hour == 0 && now.min == 0
+        update(:date, now.strftime('%Y-%m-%d %a').center(20))
+      end
+      sleep(60 - now.sec)
+    end
+  end
+
+  def setup
+    update(:clock, Time.now.strftime('%H:%M %Z').center(20))
+    update(:date, Time.now.strftime('%Y-%m-%d %a').center(20))
+    update(:msg, @config[:msg])
+  end
+end
+
+if __FILE__ == $0
+  IRPanel::Cli.run!(SimpleApp, __FILE__) do
+    @config.merge!({:msg => 'simple app'})
+    @options += [['--msg STR', String, 'Display message', lambda {|a| @config[:msg] = a }]]
+  end
+end

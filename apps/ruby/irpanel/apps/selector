@@ -1,0 +1,119 @@
+#!/usr/bin/env ruby
+# coding: utf-8
+# vim: ts=2 et sw=2 sts=2
+
+%{pp socket}.each {|g| require g }
+
+APPS = [
+  ['MPD Client', 'mpdclient', '%s', '%s:%s'],
+  ['Twitter Client', 'twitterclient', '%s', '%s:%s'],
+  ['Weather Clock', 'weatherclock', '%s', '%s:%s'],
+  ['Conky Output', '../../../shell/conky-lcd.sh', '-U %s', '%s %s'],
+  ['Suspend', '/bin/sleep 30', '', ''],
+]
+
+KEYS = {
+  '20:32' => :chanup,
+  '20:33' => :chandown,
+  '20:53' => :play,
+}
+
+unless ARGV.length == 1
+  STDERR.puts "Usage: #{$0} SOCKET|HOST:PORT"
+  exit(2)
+end
+
+target = ARGV.shift
+
+class Selector
+  GLYPHS = {
+    :rarr => 126.chr,
+    :larr => 127.chr,
+  }
+
+  def initialize(target)
+    @target = target
+    @apps = APPS
+  end
+
+  def connect
+    if File.exists? @target
+      begin
+        @socket = UNIXSocket.new(@target)
+      rescue SocketError => e
+        STDERR.puts "Can't open UNIX socket: #{e}"
+        exit(1)
+      end
+    else
+      begin
+        host, port = @target.split(':')
+        @socket = TCPSocket.new(host, port.to_i)
+      rescue => e
+        STDERR.puts "Can't connect to #{host}:#{port}: #{e}"
+        exit(1)
+      end
+    end
+  end
+
+  def send_cmd(str)
+    pp str
+    @socket.write(str)
+    pp @socket.readline
+  end
+
+  def print_apps
+    send_cmd("g:0:1\n")
+    send_cmd('p:' + @apps[0][0].slice(0, 20).center(20) + "\n")
+    send_cmd('p:' + (GLYPHS[:rarr] + ' ' + @apps[1][0].slice(0, 16) + ' ' + GLYPHS[:larr]).center(20) + "\n")
+    send_cmd('p:' + @apps[2][0].slice(0, 20).center(20) + "\n")
+  end
+
+  def roll_up; @apps.push(@apps.shift); end
+  def roll_down; @apps.unshift(@apps.pop); end
+
+  def run!
+    while true
+      connect
+      send_cmd("c\n")
+      send_cmd('p:' + 'Panel Selector'.center(20) + "\n")
+      print_apps
+      process = true
+      while process
+        rs, ws, es = IO.select([@socket], [])
+        pp pkt = @socket.readline.chop
+        if pkt.slice(0, 2) == 'ir'
+          case KEYS[pkt.slice(3, 7)]
+          when :chanup
+            roll_up
+            print_apps
+          when :chandown
+            roll_down
+            print_apps
+          when :play
+            begin
+              cmd = @apps[1][1]
+              case @socket
+              when UNIXSocket
+                cmd += ' ' + @apps[1][2] % @target
+              when TCPSocket
+                cmd += ' ' + @apps[1][3] % @target.split(':')
+              end
+              @socket.close
+              process = false
+              pp cmd
+              pp pid = spawn(cmd)
+              pp Process.waitpid(pid)
+            rescue => e
+              STDERR.puts "Error with cmd: #{e}"
+            end
+          end
+        end
+      end
+    end
+  end
+end
+
+s = Selector.new(target)
+s.run!
+
+exit(0)

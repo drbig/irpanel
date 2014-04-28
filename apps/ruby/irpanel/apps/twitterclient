@@ -1,0 +1,152 @@
+#!/usr/bin/env ruby
+# coding: utf-8
+# vim: ts=2 et sw=2 sts=2
+
+%w{irpanel irpanel/cli sanitize twitter}.each {|g| require g }
+
+class TwitterClientApp < IRPanel::App
+  GLYPHS = {
+    :rarr => 126.chr,
+    :dot => 165.chr,
+    :bar => 255.chr,
+  }
+
+  TwittText = Struct.new(:text, :source, :stamp)
+
+  field :pos,    2, 0
+  field :clock, 13, 0
+  field :text,   0, 1
+
+  context :main do
+    key('exit') do
+      update_cache
+      exit(0)
+    end
+
+    key('chanup') do
+      @line = 0
+      @pos += 1
+      update_disp
+    end
+
+    key('chandown') do
+      @line = 0
+      @pos -= 1
+      update_disp
+    end
+
+    key('down') do
+      @line += 1
+      update_disp
+    end
+
+    key('up') do
+      @line -= 1
+      update_disp
+    end
+  end
+
+  thread :clock do
+    while true
+      now = Time.now
+      update(:clock, now.strftime('%H:%M'))
+      sleep(60-now.sec)
+    end
+  end
+
+  thread :stream do
+    log :debug, 'Streaming...'
+    @client.user do |o|
+      case o
+      when Twitter::Tweet
+        text = Sanitize.clean(o.text)\
+          .gsub(/https?\:.*?($|\s)/, '')\
+          .gsub(/[\r\n]/, ' ')
+        src = Sanitize.clean(o.user.name)
+        text += " VIA: #{src}"
+        @mcache.synchronize do
+          @cache.unshift(TwittText.new(clean_str(text), src, Time.now))
+          @cache.pop if @cache.length > @config[:keep]
+          @pos = @line = 0
+        end
+        update_disp
+      when Twitter::Streaming::StallWarning
+        log :warn, 'Twitter stream falling behind'
+      end
+    end
+  end
+
+  def setup
+    @pos = @line = 0
+    @mcache = Mutex.new
+    @cache = Array.new
+
+    begin
+      if File.exists? @config[:cache]
+        @cache = File.open(@config[:cache], 'r') {|fd| Marshal.load(fd.read) }
+      end
+    rescue RuntimeError => e
+      STDERR.puts "Error loading cache: #{e}"
+    end
+
+    setup_twitter
+
+    send_cmd('p:' + '-' * 20 + "\n")
+    update(:pos, 'Now')
+    update(:clock, Time.now.strftime('%H:%M'))
+    update_disp
+  end
+
+  def setup_twitter
+    @client = Twitter::Streaming::Client.new do |config|
+      config.consumer_key        = 'FILL_ME_IN' 
+      config.consumer_secret     = 'FILL_ME_IN'
+      config.access_token        = 'FILL_ME_IN'
+      config.access_token_secret = 'FILL_ME_IN'
+    end
+  end
+
+  def update_cache
+    begin
+      File.open(@config[:cache], 'w') {|fd| fd.write(Marshal.dump(@cache)) }
+    rescue Exception => e
+      STDERR.puts "Error writing cache: #{e}"
+    end
+  end
+
+  def update_disp
+    @mcache.synchronize do
+      if @cache.length > 0
+        @pos %= @cache.length
+        twitt = @cache[@pos]
+        lines = (twitt.text.length.to_f / 20.0).ceil - 2
+        lines = lines < 1 ? 1 : lines
+        @line %= lines
+        if @pos == 0
+          update(:pos, 'Now')
+        else
+          update(:pos, '%03d' % @pos)
+        end
+        update(:text, @cache[@pos].text.slice(@line*20, 3*20).ljust(3*20))
+      else
+        update(:text, ' ' * 20 + '...'.center(20) + ' '*20)
+      end
+    end
+  end
+end
+
+if __FILE__ == $0
+  IRPanel::Cli.run!(TwitterClientApp, __FILE__) do
+    @config.merge!({
+      :loglevel => Logger::WARN,
+      :keep   => 10,
+      :cache  => 'cache.bin',
+    })
+    @options += [
+      ['--keep NUM', Integer, "Keep that mant tweets (default: #{@config[:keep]})",\
+        lambda {|a| @config[:keep] = a }],
+      ['--cache FILE', String, "Path to cache file (default: #{@config[:cache]})",\
+        lambda {|a| @config[:cache] = a }],
+    ]
+  end
+end

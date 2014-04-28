@@ -1,0 +1,86 @@
+# IRPanel - LCD+IR via USB (taken up to 11)
+
+IRPanel is what happens when you put an AVR MCU, a LCD module and an IR decoder together, and then simply take it up a couple of notches up.
+
+## Features
+
+ * Networked model of operation (like X11)
+ * Simple, ASCII packet-based communication
+ * RC5 IR decoder and parser
+ * Drive any HD-compatible LCD module
+ * PWM driven smooth control for backlight
+ * Ruby framework for writing apps
+ * But you can easily use it directly from shell
+
+## Apps showcase
+
+ * [Application selector](http://imgur.com/a/BhB56#1)
+ * [MusicPD client](http://imgur.com/a/BhB56#2)
+ * [Twitter client](http://imgur.com/a/BhB56#3)
+ * [Weather clock](http://imgur.com/a/BhB56#4)
+ * [Conky output](http://imgur.com/a/BhB56#5)
+
+## Code overview
+
+ * `firmware/` - AVR firmware (targeted for ATTiny2313)
+ * `irpaneld/` - server daemon (TCP and Unix sockets, ensures packet sanity and keeps state)
+ * `tools/` - currently only `readkeys` helper to get the remote button codes
+ * `apps/ruby/` - framework and example apps
+ * `apps/shell/` - example of communicating from shell (Conky output)
+ * `cad/` - a quick schematic drawing done with KiCad (see `irpanel.pdf`)
+
+**Status: Alpha**
+
+Currently the only big issue is that of stability - there is some problem between the firmware and the server daemon that results in 'hang-ups'. These hang-ups sometimes 'heal' themselves on their own, other times I need to restart the prototype ('unplug and plug it in again'). I'm currently unable to pin-point the real cause of the problem... It may be in the code, it may be in the hardware. Expertise and more prototypes needed.
+
+Other than that the documentation may be lacking here and there, and the overall coherence of the project could probably use some external input.
+
+## Building and basic setup
+
+```bash
+$ git clone https://github.com/drbig/irpanel.git
+$ cd irpanel/firmware/
+$ $EDITOR Makefile # adjust variables (clock, MCU model, avrdude options...)
+$ make
+$ make burn # have your programmer hooked up
+$ cd ../
+$ make all # will make irpaneld and tools
+$ cd irpaneld/
+$ ./irpaneld -h # get some idea about options
+$ ./irpaneld -d /dev/cuaU0 -t 127.0.0.1:9999 # or /dev/ttyUSB* if you're on Linux
+$ cd ../apps/shell # you'll need Conky for this
+$ $EDITOR conky-lcd.rc # edit to suit your needs
+$ ./conky-lcd.sh # should work...
+```
+
+## Ruby framework
+
+First build and install gem:
+
+```bash
+$ cd irpanel/apps/ruby/irpanel/
+$ rake gem
+$ gem install pkg/irpanel-0.0.1.gem # or prepend with sudo...
+```
+
+Example apps are included in `irpanel/apps/ruby/irpanel/apps` (these are the 'featured' apps).
+
+## Docs
+
+All sources are more-or-less commented, so even without building the docs proper there is some documentation available. For the C-coded parts you'll need Doxygen, for the Ruby framework and apps you'll need yard.
+
+```bash
+$ cd irpanel/
+$ make docs
+$ cd apps/ruby/irpanel/ && yard
+```
+
+## Wishful thinking
+
+ 1. Fix the stability issue
+ 2. Make a proper PCB design
+ 3. Document everything
+
+## Legalese
+
+See LICENSE.txt (a BSD 2-clause license).

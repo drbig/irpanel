@@ -1,0 +1,8 @@
+docs/*
+irpaneld/irpaneld
+*.o
+*.elf
+*.hex
+*.lst
+*.log
+*.pid

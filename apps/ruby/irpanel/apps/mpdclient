@@ -1,0 +1,156 @@
+#!/usr/bin/env ruby
+# coding: utf-8
+# vim: ts=2 et sw=2 sts=2
+
+%w{irpanel irpanel/cli ruby-mpd}.each {|g| require g }
+
+class MPDClientApp < IRPanel::App
+  GLYPHS = {
+    :play => 126.chr,
+    :pause => 253.chr,
+    :stop => 219.chr,
+    :dot => 165.chr,
+    :bar => 255.chr,
+  }
+
+  field :artist,    0, 0
+  field :title,     0, 1 
+  field :progress,  0, 2
+  field :time,     13, 2
+  field :volume,    0, 3
+  field :repeat,   14, 3
+  field :random,   15, 3
+  field :single,   16, 3
+  field :consume,  17, 3
+  field :mode,     19, 3
+
+  context :main do
+    key('exit')     { exit(0) }
+
+    key('play')     { @mpd.play }
+    key('stop')     { @mpd.stop }
+    key('pause')    { @mpd.pause = !@mpd.paused? }
+    key('chanup')   { @mpd.next }
+    key('chandown') { @mpd.previous }
+    key('next')     { @mpd.seek('+20') }
+    key('prev')     { @mpd.seek('-20') }
+
+    key('1')        { @mpd.repeat = !@mpd.repeat? }
+    key('2')        { @mpd.random = !@mpd.random? }
+    key('3')        { @mpd.single = !@mpd.single? }
+    key('4')        { @mpd.consume = !@mpd.consume? }
+
+    key('volup') do
+      vol = @mpd.volume
+      if vol + 5 > 100
+        @mpd.volume = 100
+      else
+        @mpd.volume += 5
+      end
+    end
+
+    key('voldown') do
+      vol = @mpd.volume
+      if vol - 5 < 0
+        @mpd.volume = 0
+      else
+        @mpd.volume -= 5
+      end
+    end
+  end
+
+  def str_time(int)
+    '%d:%02d' % [int/60, int%60]
+  end
+
+  def setup
+    opts = @config[:pass] ? {:password => @config[:pass]} : {}
+    opts[:callbacks] = true
+    @mpd = MPD.new(@config[:host], @config[:port], opts)
+    setup_mpd
+
+    unless @mpd.connect
+      STDERR.puts 'Can\'t connect to MPD'
+      exit(1)
+    end
+  end
+
+  def setup_mpd
+    @mpd.on(:consume) do |b|
+      update(:consume, b ? 'C' : GLYPHS[:dot])
+    end
+
+    @mpd.on(:single) do |b|
+      update(:single, b ? 'O' : GLYPHS[:dot])
+    end
+
+    @mpd.on(:random) do |b|
+      update(:random, b ? 'S' : GLYPHS[:dot])
+    end
+
+    @mpd.on(:repeat) do |b|
+      update(:repeat, b ? 'R' : GLYPHS[:dot])
+    end
+
+    @mpd.on(:state) do |state|
+      case state
+      when :play
+        update(:mode, GLYPHS[:play])
+        send_cmd("d:200\n")
+      when :pause
+        update(:mode, GLYPHS[:pause])
+        send_cmd("d:120\n")
+      when :stop
+        update(:mode, GLYPHS[:stop])
+        send_cmd("d:40\n")
+      end
+    end
+
+    @mpd.on(:song) do |song|
+      artist = str_clean(song.artist).slice(0, 20)
+      if artist.length < 15
+        artist += ' - ' + str_clean(song.album).slice(0, 20-3-artist.length)
+      end
+      update(:artist, artist.ljust(20))
+      update(:title, str_clean(song.title).slice(0, 20).ljust(20))
+    end
+
+    @mpd.on(:volume) do |vol|
+      bars = (vol.to_f / 12.5).round
+      bars = 8 if bars > 8
+      update(:volume, GLYPHS[:bar]*bars + GLYPHS[:dot]*(8-bars) + vol.to_s.rjust(4))
+    end
+
+    @mpd.on(:time) do |elapsed, total|
+      if elapsed and total and (total > 0)
+        percent = (elapsed.to_f / total.to_f) * 100.0
+        bars = (percent / 8.34).ceil
+        bars = 12 if bars > 12
+        update(:progress, GLYPHS[:bar]*bars + GLYPHS[:dot]*(12-bars))
+        update(:time, str_time(total-elapsed).rjust(7))
+      else
+        update(:progress, GLYPHS[:dot]*12)
+        update(:time, '0:00'.rjust(7))
+      end
+    end
+  end
+end
+
+if __FILE__ == $0
+  IRPanel::Cli.run!(MPDClientApp, __FILE__) do
+    @config.merge!({
+      :loglevel => Logger::WARN,
+      :host => '127.0.0.1',
+      :port => 6600,
+      :pass => nil,
+    })
+    @options += [
+      ['--host HOST', String, "Musicpd hostname (default: #{@config[:host]})",\
+       lambda {|a| @config[:host] = a }],
+      ['--port PORT', Integer, "Musicpd port (default: #{@config[:port]})",\
+       lambda {|a| @config[:port] = a}],
+      ['--pass PASSWORD', String, "Musicpd password (default: nil)",\
+       lambda {|a| @config[:pass] = a}],
+    ]
+  end
+end

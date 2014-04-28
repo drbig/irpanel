@@ -1,0 +1,9 @@
+out_to_x no
+out_to_console yes
+max_text_width 20
+
+TEXT
+${time %Y-%m-%d %H:%M}
+$cpu% $memperc% ${loadavg 1} ${loadavg 3}
+${if_up tun0}${upspeed tun0}/${downspeed tun0}${else}WAN DOWN${endif}
+${fs_free /mnt/array}/${fs_size /mnt/array} ${fs_used_perc /mnt/array}%
