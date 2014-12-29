@@ -1,5 +1,7 @@
 # IRPanel - LCD+IR via USB
 
+![IRPanel main screen](https://raw.github.com/drbig/irpanel/master/irpanel.jpg)
+
 IRPanel is what happens when you put an AVR MCU, a LCD module and an IR decoder together, and then simply take it up a couple of notches up.
 
 ## Features
